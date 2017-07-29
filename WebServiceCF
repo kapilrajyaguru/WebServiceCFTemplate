@@ -245,8 +245,8 @@ Resources:
         Ref: "TestLaunchConfiguration"
       LoadBalancerNames:
       - Ref: "ElasticLoadBalancer"
-      MaxSize: "4"
-      MinSize: "4"
+      MaxSize: "2"
+      MinSize: "2"
       VPCZoneIdentifier:
       - Ref: PublicSubnet1b
       - Ref: PublicSubnet1c
