@@ -1,0 +1,274 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  InstanceProfile:
+    Type: String
+    Default: arn:aws:iam::522546978358:instance-profile/SimpleCodeDeployInstanceProfile
+  LinuxAMIID:
+    Type: String
+    Default: "ami-f7482692"
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: "TestLabKeyPair"
+Mappings:
+  RegionMap:
+    us-west-1:
+      TestA: "ami-b7d2fbd7"
+      TestB: "ami-c498bba4"
+Resources:
+  TestVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: default
+      Tags:
+      - Key: Name
+        Value: TestVPC
+  PublicSubnet1b:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: TestVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: "us-west-1b"
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+      - Key: Name
+        Value: PublicSubnet-1b
+  PrivateSubnet1b:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: TestVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: "us-west-1b"
+      Tags:
+      - Key: Name
+        Value: PrivateSubnet-1b
+  PublicSubnet1c:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: TestVPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: "us-west-1c"
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+      - Key: Name
+        Value: PublicSubnet-1c
+  TestInternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+      - Key: Name
+        Value: TestIGW
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: TestVPC
+      InternetGatewayId:
+        Ref: TestInternetGateway
+  NAT:
+    DependsOn: AttachGateway
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - EIP
+          - AllocationId
+      SubnetId:
+        Ref: PublicSubnet1b
+  EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: "vpc"
+  NATGRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NAT
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: TestVPC
+      Tags:
+      - Key: Name
+        Value: PublicRouteTable
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: TestVPC
+      Tags:
+      - Key: Name
+        Value: PrivateRouteTable
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId:
+        Ref: PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: TestInternetGateway
+  PublicSubnetRouteTableAssociation1b:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PublicSubnet1b
+      RouteTableId:
+        Ref: PublicRouteTable
+  PublicSubnetRouteTableAssociation1c:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PublicSubnet1c
+      RouteTableId:
+        Ref: PublicRouteTable
+  PrivateSubnetRouteTableAssociation1b:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateSubnet1b
+      RouteTableId:
+        Ref: PrivateRouteTable
+  PublicSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http and SSH to client host
+      VpcId:
+        Ref: TestVPC
+      SecurityGroupIngress:
+      -
+        IpProtocol: "tcp"
+        FromPort: "22"
+        ToPort: "22"
+        CidrIp: "0.0.0.0/0"
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      -
+        IpProtocol: "-1"
+        FromPort: -1
+        ToPort: "-1"
+        CidrIp: "0.0.0.0/0"
+      Tags:
+      - Key: Name
+        Value: PublicSG
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH to client host
+      VpcId:
+        Ref: TestVPC
+      SecurityGroupIngress:
+      -
+        IpProtocol: "tcp"
+        FromPort: "22"
+        ToPort: "22"
+        CidrIp: "0.0.0.0/0"
+      SecurityGroupEgress:
+      -
+        IpProtocol: "tcp"
+        FromPort: "22"
+        ToPort: "22"
+        CidrIp: "0.0.0.0/0"
+      Tags:
+      - Key: Name
+        Value: PrivateSG
+  ElasticLoadBalancer:
+    Type: AWS::ElasticLoadBalancing::LoadBalancer
+    Properties:
+      Subnets:
+      - Ref: PublicSubnet1b
+      - Ref: PublicSubnet1c
+      Listeners:
+      - LoadBalancerPort: '80'
+        InstancePort: '80'
+        Protocol: HTTP
+      SecurityGroups:
+        - Ref: PublicSecurityGroup
+      HealthCheck:
+        Target: HTTP:80/
+        HealthyThreshold: '3'
+        UnhealthyThreshold: '5'
+        Interval: '30'
+        Timeout: '5'
+      ConnectionDrainingPolicy:
+        Enabled: 'true'
+        Timeout: '60'
+      CrossZone: 'true'
+      Tags:
+       - Key: Name
+         Value: TestELB
+  TestLaunchConfiguration:
+    Type: "AWS::AutoScaling::LaunchConfiguration"
+    Properties:
+      ImageId:
+        Ref: "LinuxAMIID"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum update -y
+          yum install httpd -y
+          yum install ruby
+          yum install aws-cli
+          cd ~
+          aws s3 cp s3://aws-codedeploy-us-west-1/latest/install . --region us-west-1
+          chmod +x ./install
+          ./install auto
+          echo 'hello world' > /var/www/html/index.html
+          hostname >> /var/www/html/index.html
+          chkconfig httpd on
+          service httpd start
+      IamInstanceProfile:
+        Ref: "InstanceProfile"
+      InstanceType: t2.medium
+      KeyName:
+        Ref: "KeyName"
+      SecurityGroups:
+      - Ref: "PublicSecurityGroup"
+  AutoScalingGroup:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    Properties:
+      AvailabilityZones:
+        Fn::GetAZs: ""
+      LaunchConfigurationName:
+        Ref: "TestLaunchConfiguration"
+      LoadBalancerNames:
+      - Ref: "ElasticLoadBalancer"
+      MaxSize: "4"
+      MinSize: "4"
+      VPCZoneIdentifier:
+      - Ref: PublicSubnet1b
+      - Ref: PublicSubnet1c
+      Tags:
+        - Key: Name
+          Value: WebServer
+          PropagateAtLaunch: 'true'
+  EC2Instance1bPrv:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      ImageId: "ami-02edce62"
+      InstanceInitiatedShutdownBehavior: "stop"
+      InstanceType: t2.micro
+      KeyName: TestLabKeyPair
+      SecurityGroupIds:
+        - Ref: "PrivateSecurityGroup"
+      SubnetId:
+        Ref: "PrivateSubnet1b"
+      Tags:
+        - Key: Name
+          Value: AppServer
